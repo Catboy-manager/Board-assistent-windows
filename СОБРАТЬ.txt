@@ -1,0 +1,40 @@
+СБОРКА ДЕСКТОП-ПРИЛОЖЕНИЯ (Windows)
+=====================================
+
+1) Установите Node.js LTS (если ещё нет):
+   - скачать: https://nodejs.org/en/download (выберите Windows Installer .msi)
+   - установить по умолчанию, перезапустить терминал
+
+2) В командной строке (cmd) или PowerShell перейдите в эту папку, например:
+
+   cd C:\Users\ВашеИмя\Documents\kanban-desktop\windows
+
+3) Установите зависимости (один раз):
+
+   npm install
+
+4) Запустить сразу (режим разработки):
+
+   npm start
+
+5) Собрать готовые дистрибутивы (установщик + portable):
+
+   npm run dist
+
+После сборки появятся два файла в подпапке dist:
+   - "Kanban Board Setup ...exe"    — установщик (ярлыки, меню «Пуск»)
+   - "Kanban Board ...exe"          — portable-версия (без установки)
+
+Для голоса и ИИ на этом ПК дополнительно понадобятся:
+   - opencode: curl -fsSL https://opencode.ai/install | bash   (или в PowerShell: iwr https://opencode.ai/install -useb | iex)
+   - python + pip install faster-whisper pyav  (распознавание речи)
+   - озвучка ответов (TTS): python + pip install piper-tts, затем положите модель piper
+     в %USERPROFILE%\.kanban-desktop\tts\ (файлы ru_RU-irina-medium.onnx и .onnx.json — см. README), 
+     либо используйте espeak-ng, либо отключите 🔊.
+
+Системный ассистент (панель 🤖 в ИИ-окне):
+   - 🔊 — озвучка ответов ИИ (вкл/выкл)
+   - ⏰ — напоминание через N минут (уведомление + озвучка)
+   - 🧠 — долговременная память («запомни, что…» в чате обрабатывается без ИИ); ПКМ — очистить
+   - 📸 — скриншот; 🔉/🔊 — громкость; 📋 — буфер обмена в строку ввода
+   - Настройки → ИИ: переключатель движка (opencode CLI / локальная модель Ollama, если установлена)

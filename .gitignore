@@ -1,0 +1,10 @@
+node_modules/
+dist/
+build/
+config.json
+*.log
+data/
+tts/*.onnx
+tts/*.onnx.json
+app/app/data/
+app/app/stt/
