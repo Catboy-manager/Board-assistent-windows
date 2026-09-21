@@ -53,7 +53,9 @@ if (typeof movies.prime === 'function') movies.prime();
 
 let config = {};
 try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { console.error('config.json not read:', e.message); }
-consoleAuth.key = String(process.env.KANBAN_CONSOLE_KEY || (config && config.consoleKey) || '');
+let bundleCfg = {};
+try { bundleCfg = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'), 'utf8')); } catch (e) {}
+consoleAuth.key = String(process.env.KANBAN_CONSOLE_KEY || (config && config.consoleKey) || (bundleCfg && bundleCfg.consoleKey) || '');
 
 let db = defaultDb();
 try {
