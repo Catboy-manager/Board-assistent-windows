@@ -139,7 +139,7 @@ function json(res, code, obj) {
 }
 
 function serverError(res, err, log = '') {
-  if (log) console.error(log, err && err.message);
+  if (log) console.error(log, err && (err.stack || err.message));
   json(res, 500, { error: err && err.message ? err.message : 'server error' });
 }
 
