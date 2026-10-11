@@ -164,6 +164,11 @@ function mergeSave(incoming) {
       if (defCol) out.settings.background = Object.assign({}, cur.settings.background);
     }
   }
+  if (cur.layout && typeof cur.layout === 'object') {
+    const incLayout = (incoming && incoming.layout && typeof incoming.layout === 'object') ? incoming.layout : null;
+    if (!incLayout) out.layout = Object.assign({}, cur.layout);
+    else out.layout = Object.assign({}, incLayout);
+  }
   return out;
 }
 
