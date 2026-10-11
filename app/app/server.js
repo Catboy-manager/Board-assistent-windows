@@ -146,6 +146,13 @@ function mergeSave(incoming) {
   out.board = Object.assign({}, curBoard, incBoard, { cards, columns });
   out.events = events;
   out._tombstones = T;
+  if (cur && cur.settings) {
+    const incSettings = (incoming && incoming.settings && typeof incoming.settings === 'object') ? incoming.settings : {};
+    out.settings = Object.assign({}, incSettings);
+    for (const k of Object.keys(cur.settings)) {
+      if (!(k in incSettings)) out.settings[k] = cur.settings[k];
+    }
+  }
   return out;
 }
 
@@ -1123,14 +1130,29 @@ async function handleRequest(req, res) {
     let file = p === '/' ? '/index.html' : p;
     const target = path.normalize(path.join(PUBLIC_DIR, file));
     if (!target.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end('forbidden'); }
-    if (!fs.existsSync(target) || fs.statSync(target).isDirectory()) { res.writeHead(404); return res.end('not found'); }
+    let st;
+    try { st = fs.statSync(target); } catch (e) { st = null; }
+    if (!st || st.isDirectory()) { res.writeHead(404); return res.end('not found'); }
     const ext = path.extname(target).toLowerCase();
     const isDoc = ['.html', '.htm', '.js', '.css', '.json', '.mjs'].includes(ext);
-    res.writeHead(200, {
+    const etag = '"' + st.size + '-' + Math.floor(st.mtimeMs / 1000) + '"';
+    const inm = Array.isArray(req.headers['if-none-match']) ? req.headers['if-none-match'][0] : req.headers['if-none-match'];
+    if (inm === etag) {
+      res.writeHead(304, { 'ETag': etag, 'Cache-Control': ext === '.html' || ext === '.htm' ? 'no-store' : 'no-cache' });
+      return res.end();
+    }
+    const headers = {
       'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': isDoc ? 'no-store' : 'public, max-age=86400'
-    });
-    fs.createReadStream(target).pipe(res);
+      'Content-Length': st.size,
+      'ETag': etag
+    };
+    if (ext === '.html' || ext === '.htm') headers['Cache-Control'] = 'no-store';
+    else if (isDoc) headers['Cache-Control'] = 'no-cache';
+    else headers['Cache-Control'] = 'public, max-age=86400';
+    res.writeHead(200, headers);
+    const rs = fs.createReadStream(target);
+    rs.on('error', () => { try { res.destroy(); } catch (e) {} });
+    rs.pipe(res);
   } catch (err) {
     serverError(res, err, 'router');
   }
