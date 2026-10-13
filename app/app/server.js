@@ -87,12 +87,22 @@ function defaultDb() {
     events: [],
     settings: {
       background: { type: 'color', value: '#1e2a3a', blur: 0, darken: 0 }
-    }
+    },
+    layout: {}
   };
 }
 
 function saveDb() {
-  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2));
+  /* Атомарная запись: temp + rename, чтобы транзакция не потерялась
+     при крахе/отключении питания посреди writeFileSync. */
+  const tmp = DB_FILE + '.tmp';
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(db, null, 2));
+    fs.renameSync(tmp, DB_FILE);
+  } catch (e) {
+    console.error('saveDb failed:', e.message);
+    try { fs.unlinkSync(tmp); } catch (e2) {}
+  }
 }
 
 function publicDb() {
@@ -101,10 +111,8 @@ function publicDb() {
   return d;
 }
 
-/* Слияние списков: клиенты шлют всю доску целиком, поэтому устаревшая вкладка
-   может «стереть» чужие карточки. Удалением считается ТОЛЬКО явный список
-   _deleted = {cards:[], columns:[], events:[]}; отсутствие id во входящей доске
-   больше НЕ является удалением (влияет только tombstone). */
+/* Слияние списков с «надгробиями»: id, удалённые в текущем состоянии,
+   не воскресают, если их пришлёт устаревший клиент (полная перезапись доски). */
 function mergeList(curArr, incArr, tomb, deleted) {
   const cur = Array.isArray(curArr) ? curArr : [];
   const inc = Array.isArray(incArr) ? incArr : [];
@@ -1120,8 +1128,11 @@ async function handleRequest(req, res) {
     if (p === '/ca.pem') {
       const ca = path.join(ROOT, 'ssl', 'ca.pem');
       if (fs.existsSync(ca)) {
-        res.writeHead(200, { 'Content-Type': 'application/x-pem-file' });
-        return fs.createReadStream(ca).pipe(res);
+        const st = fs.statSync(ca);
+        res.writeHead(200, { 'Content-Type': 'application/x-pem-file', 'Content-Length': st.size });
+        const rs = fs.createReadStream(ca);
+        rs.on('error', () => { try { res.destroy(); } catch (e) {} });
+        return rs.pipe(res);
       }
       return json(res, 404, { error: 'no ca' });
     }
@@ -1129,8 +1140,11 @@ async function handleRequest(req, res) {
     if (p === '/setup') {
       const sp = path.join(PUBLIC_DIR, 'setup.html');
       if (fs.existsSync(sp)) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-        return fs.createReadStream(sp).pipe(res);
+        const st = fs.statSync(sp);
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': st.size });
+        const rs = fs.createReadStream(sp);
+        rs.on('error', () => { try { res.destroy(); } catch (e) {} });
+        return rs.pipe(res);
       }
       return json(res, 404, { error: 'no setup page' });
     }
@@ -1139,8 +1153,11 @@ async function handleRequest(req, res) {
       const file = path.normalize(path.join(UPLOAD_DIR, path.basename(p)));
       if (!fs.existsSync(file)) { res.writeHead(404); return res.end('not found'); }
       const ext = path.extname(file).toLowerCase();
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
-      return fs.createReadStream(file).pipe(res);
+      const st = fs.statSync(file);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Content-Length': st.size, 'Cache-Control': 'public, max-age=86400' });
+      const rs = fs.createReadStream(file);
+      rs.on('error', () => { try { res.destroy(); } catch (e) {} });
+      return rs.pipe(res);
     }
 
     let file = p === '/' ? '/index.html' : p;
