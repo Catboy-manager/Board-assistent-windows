@@ -41,6 +41,7 @@ const games = require('./games')({
 });
 const news = require('./news')({ dataDir: DATA_DIR, readBody, json });
 const music = require('./music')({ dataDir: DATA_DIR, json });
+const sounds = require('./sounds')({ dataDir: DATA_DIR, json, uploadsDir: UPLOAD_DIR });
 const notify = require('./notify')({ dataDir: DATA_DIR, json });
 const messages = require('./messages')({ json, notify });
 const ops = require('./ops')({ dataDir: DATA_DIR, json });
@@ -1113,10 +1114,12 @@ async function handleRequest(req, res) {
       if (p.startsWith('/api/news')) { if (await news.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/music')) { if (await music.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/ops')) { if (await ops.handle(p, url, req, res)) return; }
+      if (p.startsWith('/api/sounds')) { if (await sounds.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/notify')) { if (await notify.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/msgs')) { if (await messages.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/gh')) { if (await gh.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/yt')) { if (await youtube.handle(p, url, req, res)) return; }
+      if (p.startsWith('/api/interests')) { if (await youtube.interestsHandle(p, url, req, res)) return; }
       if (p.startsWith('/api/smart')) { if (await smart.handle(p, url, req, res)) return; }
       if (p.startsWith('/api/console')) { if (await consoleMod.handle(p, url, req, res)) return; }
       if (req.method === 'GET' && p === '/api/ping') return json(res, 200, { ok: true });
