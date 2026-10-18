@@ -16,7 +16,17 @@
     "appId": "ru.kanban.desktop",
     "productName": "Kanban Board",
     "asar": false,
-    "files": ["main.js", "app/**", "build/**", "package.json"],
+    "files": [
+      "main.js",
+      "app/**",
+      "build/**",
+      "package.json",
+      "!app/app/config.json",
+      "!app/app/data/**",
+      "!app/app/uploads/**",
+      "!**/*.log",
+      "!**/.DS_Store"
+    ],
     "directories": { "output": "dist" },
     "win": {
       "target": ["nsis", "portable"],

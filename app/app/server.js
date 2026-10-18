@@ -9,11 +9,24 @@ const { spawn, execFile } = require('child_process');
 
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, 'public');
-const DATA_DIR = path.join(ROOT, 'data');
-const UPLOAD_DIR = path.join(ROOT, 'uploads');
+const DATA_DIR = process.env.KANBAN_DATA_DIR || path.join(os.homedir(), '.kanban-desktop');
+const UPLOAD_DIR = process.env.KANBAN_UPLOAD_DIR || path.join(DATA_DIR, 'uploads');
 const DB_FILE = path.join(DATA_DIR, 'db.json');
-const CONFIG_FILE = path.join(ROOT, 'config.json');
+const CONFIG_FILE = process.env.KANBAN_CONFIG_FILE || path.join(DATA_DIR, 'config.json');
 const MAX_BODY = 30 * 1024 * 1024;
+
+/* Данные хранятся в домашней директории: папка самой приложения read-only
+   (AppImage, Program Files). Гарантируем каталоги и переносим старые данные
+   из папки приложения (data/ рядом с server.js). */
+try { fs.mkdirSync(DATA_DIR, { recursive: true }); fs.mkdirSync(UPLOAD_DIR, { recursive: true }); } catch (e) {}
+try {
+  const legacy = path.join(ROOT, 'data');
+  if (path.resolve(DATA_DIR) !== path.resolve(legacy) && !fs.existsSync(DB_FILE) && fs.existsSync(path.join(legacy, 'db.json'))) {
+    for (const f of fs.readdirSync(legacy)) { try { fs.cpSync(path.join(legacy, f), path.join(DATA_DIR, f), { recursive: true }); } catch (e) {} }
+  }
+  const legacyCfg = path.join(ROOT, 'config.json');
+  if (path.resolve(CONFIG_FILE) !== path.resolve(legacyCfg) && !fs.existsSync(CONFIG_FILE) && fs.existsSync(legacyCfg)) { try { fs.copyFileSync(legacyCfg, CONFIG_FILE); } catch (e) {} }
+} catch (e) {}
 
 const assist = require('./assist')({ dataDir: DATA_DIR });
 const telegram = require('./telegram-bot');
@@ -65,8 +78,8 @@ const consoleMod = require('./console')({
 });
 if (typeof movies.prime === 'function') movies.prime();
 
-let config = {};
-try { config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')); } catch (e) { console.error('config.json not read:', e.message); }
+let config = { ai: {} };
+try { config = Object.assign({ ai: {} }, JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'))); } catch (e) { console.error('config.json not read:', e.message); }
 consoleAuth.key = String(process.env.KANBAN_CONSOLE_KEY || (config && config.consoleKey) || '');
 
 let db = defaultDb();
@@ -999,10 +1012,15 @@ async function uploadHandler(req, res, body) {
 
 function configHandler(req, res, body) {
   if (req.method === 'GET') {
+    /* Не отдаём секреты по сети: apiKey скрываем, только флаг «задан ли». */
+    const ai = Object.assign({}, config.ai || {});
+    const hasKey = Boolean(ai.apiKey);
+    delete ai.apiKey;
     return json(res, 200, {
       port: config.port,
       cityName: config.cityName,
-      ai: config.ai
+      ai: ai,
+      hasApiKey: hasKey
     });
   }
   const ai = body && body.ai;
@@ -1011,7 +1029,8 @@ function configHandler(req, res, body) {
     if (typeof ai.opencodeBin === 'string') config.ai.opencodeBin = ai.opencodeBin;
     if (typeof ai.projectsDir === 'string') { config.ai.projectsDir = ai.projectsDir; aiProjectsDir = null; }
     if (typeof ai.baseUrl === 'string') config.ai.baseUrl = ai.baseUrl;
-    if (typeof ai.apiKey === 'string') config.ai.apiKey = ai.apiKey;
+    /* Пустое поле = «не менять», чтобы форма без введённого ключа не стирала сохранённый. */
+    if (typeof ai.apiKey === 'string' && ai.apiKey.trim() !== '') config.ai.apiKey = ai.apiKey.trim();
     if (typeof ai.model === 'string') config.ai.model = ai.model;
     if (typeof ai.systemPrompt === 'string') config.ai.systemPrompt = ai.systemPrompt;
     saveConfig();
