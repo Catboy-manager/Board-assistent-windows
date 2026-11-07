@@ -1,11 +1,11 @@
 'use strict';
 
-const { app, BrowserWindow, Tray, Menu, dialog, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, dialog, shell, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const http = require('http');
-const { fork } = require('child_process');
+const { fork, execFile } = require('child_process');
 
 const PORT = Number(process.env.KANBAN_PORT || 8123);
 const IS_MAC = process.platform === 'darwin';
@@ -15,6 +15,35 @@ let tray = null;
 let serverChild = null;
 let isQuitting = false;
 let serverReady = false;
+
+/* ---------- история браузеров с этого устройства ---------- */
+function historyScript() {
+  const candidates = [
+    path.join(__dirname, 'app', 'app', 'history-collect.py'),
+    path.join(__dirname, 'app', 'history-collect.py')
+  ];
+  return candidates.find(p => fs.existsSync(p)) || candidates[0];
+}
+
+function collectHistory() {
+  return new Promise((resolve) => {
+    const script = historyScript();
+    if (!fs.existsSync(script)) return resolve({ ok: false, error: 'history-collect.py not found', rows: [], sources: [] });
+    const cmd = process.platform === 'win32' ? 'python' : 'python3';
+    const args = [script];
+    execFile(cmd, args, { timeout: 60000, maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+      if (err && !stdout) return resolve({ ok: false, error: String(err.message || err), rows: [], sources: [] });
+      try {
+        const data = JSON.parse(String(stdout || '{}'));
+        resolve(data);
+      } catch (e) {
+        resolve({ ok: false, error: 'bad history output: ' + String(e.message || e), rows: [], sources: [] });
+      }
+    });
+  });
+}
+
+ipcMain.handle('kanban:collect-history', () => collectHistory());
 
 /* ---------- единственный экземпляр ---------- */
 const gotLock = app.requestSingleInstanceLock();
@@ -35,10 +64,12 @@ function startServer() {
   return new Promise((resolve, reject) => {
     if (serverChild) return resolve();
     stopServer();
-    const serverPath = path.join(__dirname, 'app', 'server.js');
+    const nestedServer = path.join(__dirname, 'app', 'app', 'server.js');
+    const serverPath = fs.existsSync(nestedServer) ? nestedServer : path.join(__dirname, 'app', 'server.js');
     serverChild = fork(serverPath, [], {
       env: Object.assign({}, process.env, {
         KANBAN_PORT: String(PORT),
+        KANBAN_DESKTOP: '1',
         KANBAN_DATA_DIR: process.env.KANBAN_DATA_DIR || '',
         KANBAN_UPLOAD_DIR: process.env.KANBAN_UPLOAD_DIR || '',
         KANBAN_CONFIG_FILE: process.env.KANBAN_CONFIG_FILE || ''
@@ -93,9 +124,10 @@ function createWindow() {
     backgroundColor: '#1e2a3a',
     icon: iconPath,
     webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true,
+      sandbox: false,
       spellcheck: false
     }
   });

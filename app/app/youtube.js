@@ -98,49 +98,117 @@ module.exports = (deps) => {
   function saveAuth() { try { fs.writeFileSync(AUTH_FILE, JSON.stringify(auth, null, 2)); } catch (e) {} }
   function cookiesExist() { try { return fs.existsSync(COOKIES_FILE) && fs.statSync(COOKIES_FILE).size > 0; } catch (e) { return false; } }
 
-  /* Ищет файлы cookies популярных браузеров (обычные и snap/flatpak). */
-  function browserCookieDbs(browser) {
-    const home = require('os').homedir();
+  /* Возвращает список подпапок-профилей Chrome/Chromium, где есть Cookies или History. */
+  function chromeProfilesIn(root) {
     const out = [];
-    const push = (p) => { try { if (fs.existsSync(p)) out.push(p); } catch (e) {} };
-    const chromeProfiles = ['Default', 'Profile 1', 'Profile 2', 'Profile 3'];
-    const chromeRoots = [
-      path.join(home, '.config/google-chrome'),
-      path.join(home, '.config/chromium'),
-      path.join(home, 'snap/chromium/common/chromium'),
-      path.join(home, '.var/app/org.chromium.Chromium/config/chromium')
-    ];
-    const firefoxRoots = [
-      path.join(home, '.mozilla/firefox'),
-      path.join(home, 'snap/firefox/common/.mozilla/firefox'),
-      path.join(home, '.var/app/org.mozilla.firefox/.mozilla/firefox')
-    ];
-    const wantChrome = !browser || browser === 'chrome';
-    const wantFirefox = !browser || browser === 'firefox';
-    if (wantChrome) {
-      for (const root of chromeRoots) for (const prof of chromeProfiles) push(path.join(root, prof, 'Cookies'));
-    }
-    if (wantFirefox) {
-      for (const root of firefoxRoots) {
+    try {
+      for (const d of fs.readdirSync(root)) {
+        if (d === 'System Profile' || /^Guest Profile$/.test(d)) continue;
+        const base = path.join(root, d);
         try {
-          for (const d of fs.readdirSync(root)) {
-            if (/\.default/.test(d) || /\.default-release/.test(d)) push(path.join(root, d, 'cookies.sqlite'));
-          }
+          if (!fs.statSync(base).isDirectory()) continue;
+          if (fs.existsSync(path.join(base, 'Cookies')) || fs.existsSync(path.join(base, 'History'))) out.push(base);
         } catch (e) {}
       }
-    }
+    } catch (e) {}
     return out;
   }
 
-  /* Читает cookies из одной БД браузера (скопировав файл, чтобы не мешать блокировке).
+  /* Корни профилей Chrome/Chromium/Brave/Edge во всех ОС. */
+  function chromeRoots() {
+    const home = require('os').homedir();
+    const env = process.env;
+    const list = [
+      path.join(home, '.config/google-chrome'),
+      path.join(home, '.config/chromium'),
+      path.join(home, '.config/BraveSoftware/Brave-Browser'),
+      path.join(home, '.config/microsoft-edge'),
+      path.join(home, 'snap/chromium/common/chromium'),
+      path.join(home, '.var/app/org.chromium.Chromium/config/chromium'),
+      path.join(home, 'Library/Application Support/Google/Chrome'),
+      path.join(home, 'Library/Application Support/Chromium'),
+      path.join(home, 'Library/Application Support/BraveSoftware/Brave-Browser')
+    ];
+    if (env.LOCALAPPDATA) {
+      list.push(path.join(env.LOCALAPPDATA, 'Google/Chrome/User Data'));
+      list.push(path.join(env.LOCALAPPDATA, 'Chromium/User Data'));
+      list.push(path.join(env.LOCALAPPDATA, 'BraveSoftware/Brave-Browser/User Data'));
+      list.push(path.join(env.LOCALAPPDATA, 'Microsoft/Edge/User Data'));
+    }
+    return list;
+  }
+
+  /* Корни профилей Firefox во всех ОС. */
+  function firefoxRoots() {
+    const home = require('os').homedir();
+    const env = process.env;
+    const list = [
+      path.join(home, '.mozilla/firefox'),
+      path.join(home, 'snap/firefox/common/.mozilla/firefox'),
+      path.join(home, '.var/app/org.mozilla.firefox/.mozilla/firefox'),
+      path.join(home, 'Library/Application Support/Firefox/Profiles')
+    ];
+    if (env.APPDATA) list.push(path.join(env.APPDATA, 'Mozilla/Firefox/Profiles'));
+    return list;
+  }
+
+  function firefoxProfilesIn(root) {
+    const out = [];
+    try {
+      for (const d of fs.readdirSync(root)) {
+        const base = path.join(root, d);
+        try {
+          if (!fs.statSync(base).isDirectory()) continue;
+          if (fs.existsSync(path.join(base, 'cookies.sqlite')) || fs.existsSync(path.join(base, 'places.sqlite'))) out.push(base);
+        } catch (e) {}
+      }
+    } catch (e) {}
+    return out;
+  }
+
+  /* Ищет файлы cookies популярных браузеров (обычные и snap/flatpak, Linux/macOS/Windows). */
+  function browserCookieDbs(browser) {
+    const out = [];
+    const push = (p) => { try { if (fs.existsSync(p)) out.push(p); } catch (e) {} };
+    const wantChrome = !browser || browser === 'chrome';
+    const wantFirefox = !browser || browser === 'firefox';
+    if (wantChrome) for (const root of chromeRoots()) for (const prof of chromeProfilesIn(root)) push(path.join(prof, 'Cookies'));
+    if (wantFirefox) for (const root of firefoxRoots()) for (const prof of firefoxProfilesIn(root)) push(path.join(prof, 'cookies.sqlite'));
+    return out;
+  }
+
+  /* Ищет БД истории посещений (Chrome History / Firefox places.sqlite). */
+  function browserHistoryDbs(browser) {
+    const out = [];
+    const push = (p) => { try { if (fs.existsSync(p)) out.push(p); } catch (e) {} };
+    const wantChrome = !browser || browser === 'chrome';
+    const wantFirefox = !browser || browser === 'firefox';
+    if (wantChrome) for (const root of chromeRoots()) for (const prof of chromeProfilesIn(root)) push(path.join(prof, 'History'));
+    if (wantFirefox) for (const root of firefoxRoots()) for (const prof of firefoxProfilesIn(root)) push(path.join(prof, 'places.sqlite'));
+    return out;
+  }
+
+  /* Копирует БД вместе с WAL/SHM (свежие записи Chrome лежат в -wal, без него данные «отстают»). */
+  function copyDbWithWal(db) {
+    const tmp = db + '.kanban.tmp';
+    fs.copyFileSync(db, tmp);
+    for (const suf of ['-wal', '-shm']) {
+      try { if (fs.existsSync(db + suf)) fs.copyFileSync(db + suf, tmp + suf); } catch (e) {}
+    }
+    return tmp;
+  }
+  function cleanupTmp(tmp) {
+    for (const suf of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmp + suf); } catch (e) {} }
+  }
+
+  /* Читает cookies из одной БД браузера (скопировав файл вместе с WAL, чтобы не мешать блокировке).
      Возвращает { rows: ["Domain=host\tname\thost", …] }. */
   function readOneCookieDb(db) {
     let Database;
     try { Database = require('node:sqlite').DatabaseSync; } catch (e) { return { rows: [], error: 'no sqlite' }; }
     let tmp = null;
     try {
-      tmp = db + '.kanban.tmp';
-      fs.copyFileSync(db, tmp);
+      tmp = copyDbWithWal(db);
       const d = new Database(tmp, { readOnly: true });
       let raw = [];
       try {
@@ -154,7 +222,33 @@ module.exports = (deps) => {
     } catch (e) {
       return { rows: [], error: String((e && e.message) || e) };
     } finally {
-      try { if (tmp) fs.unlinkSync(tmp); } catch (e) {}
+      cleanupTmp(tmp);
+    }
+  }
+
+  /* Читает историю посещений (URL + заголовки) — она меняется каждый день,
+     в отличие от cookies, поэтому именно она отражает активность в браузере. */
+  function readOneHistoryDb(db, limit) {
+    let Database;
+    try { Database = require('node:sqlite').DatabaseSync; } catch (e) { return { rows: [], error: 'no sqlite' }; }
+    const lim = limit || 3000;
+    let tmp = null;
+    try {
+      tmp = copyDbWithWal(db);
+      const d = new Database(tmp, { readOnly: true });
+      let raw = [];
+      try {
+        raw = d.prepare('SELECT url AS url, title AS title FROM urls WHERE url IS NOT NULL ORDER BY last_visit_time DESC LIMIT ' + lim).all();
+      } catch (e) {
+        try { raw = d.prepare('SELECT url AS url, title AS title FROM moz_places WHERE url IS NOT NULL AND title IS NOT NULL ORDER BY last_visit_date DESC LIMIT ' + lim).all(); } catch (e2) { raw = []; }
+      }
+      try { d.close(); } catch (e) {}
+      const rows = raw.filter(r => r && r.url).map(r => String(r.url) + '\t' + (r.title || ''));
+      return { rows };
+    } catch (e) {
+      return { rows: [], error: String((e && e.message) || e) };
+    } finally {
+      cleanupTmp(tmp);
     }
   }
 
@@ -164,20 +258,30 @@ module.exports = (deps) => {
     return parts.slice(-2).join('/');
   }
 
-  /* Читает cookies из БД браузера. Возвращает строку "Domain=host\tname" для анализа. */
-  function extractBrowserCookies(browser) {
-    const dbs = browserCookieDbs(browser);
-    if (!dbs.length) return { ok: false, error: 'no browser cookie db found' };
+  /* Читает cookies И историю из браузера. Возвращает текст для анализа сигналов.
+     opts.withHistory !== false — добавляет историю посещений (важно: она ежедневно меняется). */
+  function extractBrowserCookies(browser, opts) {
+    const withHistory = !(opts && opts.withHistory === false);
+    const cookieDbs = browserCookieDbs(browser);
+    const historyDbs = withHistory ? browserHistoryDbs(browser) : [];
+    const dbs = cookieDbs.concat(historyDbs);
+    if (!cookieDbs.length && !historyDbs.length) return { ok: false, error: 'no browser cookie db found' };
     const lines = [];
     let used = '';
+    let cookieCount = 0, historyCount = 0;
     const details = [];
-    for (const db of dbs) {
+    for (const db of cookieDbs) {
       const r = readOneCookieDb(db);
-      details.push({ db, count: r.rows.length });
-      if (r.rows.length) { lines.push(...r.rows); used = db; }
+      details.push({ db, kind: 'cookies', count: r.rows.length });
+      if (r.rows.length) { lines.push(...r.rows); cookieCount += r.rows.length; used = used || db; }
     }
-    if (!lines.length) return { ok: false, error: 'no cookies read' };
-    return { ok: true, text: lines.join('\n'), count: lines.length, browser: used, details, dbs };
+    for (const db of historyDbs) {
+      const r = readOneHistoryDb(db);
+      details.push({ db, kind: 'history', count: r.rows.length });
+      if (r.rows.length) { lines.push(...r.rows); historyCount += r.rows.length; used = used || db; }
+    }
+    if (!lines.length) return { ok: false, error: 'no cookies or history read', dbs, details };
+    return { ok: true, text: lines.join('\n'), count: lines.length, cookieCount, historyCount, browser: used, details, dbs };
   }
 
 
@@ -272,32 +376,68 @@ module.exports = (deps) => {
   }
 
   /* ---------- карта интересов ---------- */
-  function matchesWord(text, w) { return String(text).toLowerCase().includes(String(w).toLowerCase()); }
+  /* Совпадение стема по началу слова: «спорт» найдёт «спорта»/«спортзал»,
+     но НЕ «киберспорт»; «nba» — только «NBA», а не «kanban». */
+  function matchesWord(text, w) {
+    const stem = String(w || '').toLowerCase().trim();
+    if (!stem) return false;
+    const esc = stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp('(?:^|[^a-zа-яё0-9])' + esc, 'i').test(String(text));
+  }
 
-  /* Сигналы-слова из cookie-строки, с привязкой к категории (для лога тегов). */
-  function cookieSignals(txt) {
-    const t = String(txt || '').toLowerCase();
-    const found = new Set();
-    const add = (re, words) => { if (re.test(t)) words.forEach(w => found.add(w)); };
-    add(/(tech|linux|dev|code|program|github|stackoverflow|habr|nvidia|amd|intel|python|javascript|typescript|docker|kubernetes|openai|нейросет|искусственн|программ|технолог)/, ['технолог', 'программ', 'нейросет', 'github']);
-    add(/(youtube|youtu\.be|video|watch|музык|песн|music|spotify|soundcloud)/, ['музык', 'video', 'плейлист']);
-    add(/(netflix|kinopoisk|imdb|movie|film|cinema|сериал|кино|фильм)/, ['фильм', 'сериал', 'кино']);
-    add(/(steam|epicgames|gog|game|игр|гейм|twitch|киберспорт)/, ['игр', 'game', 'steam']);
-    add(/(science|arxiv|nasa|space|physics|nature\.com|наука|косм|spacex)/, ['наук', 'косм', 'физик']);
-    add(/(cook|recipe|food|кулин|рецепт|eda|delivery)/, ['кулин', 'рецепт']);
-    add(/(sport|football|soccer|nba|nfl|спорт|футбол)/, ['спорт', 'футбол']);
-    add(/(coursera|edx|udemy|learn|курс|education|stepik|учё|учеб)/, ['курс', 'учё', 'образован']);
-    add(/(amazon|ozon|wildberries|shop|market|покуп|маркет|alibaba|aliexpress)/, ['покуп', 'маркет']);
-    add(/(crypto|bitcoin|binance|finance|bank|трейд|крипт|финанс|инвест)/, ['крипт', 'финанс', 'инвест']);
-    add(/(travel|trip|hotel|booking|airbnb|avia|авиа|отель|туризм|путешеств)/, ['путешеств', 'отель', 'авиа']);
-    add(/(auto|car|drive|tesla|bmw|toyota|drom|avito|авто|машин)/, ['авто', 'машин', 'двигател']);
-    add(/(health|doctor|fitness|gym|витамин|здоров|фитнес|тренировк)/, ['здоров', 'фитнес', 'тренировк']);
-    const allCats = INTEREST_CATS.concat(EXTRA_THEMES);
-    return Array.from(found).slice(0, 40).map(w => {
-      let cat = null;
-      for (const c of allCats) if (c.words.some(x => w.includes(String(x).toLowerCase()) || String(x).toLowerCase().includes(w))) { cat = c; break; }
-      return { word: w, key: cat ? cat.key : null, label: cat ? cat.label : 'Прочее', icon: cat ? cat.icon : '✨' };
+  /* Реальные сигналы из истории браузера: поисковые запросы и просмотренное
+     на YouTube. Cookies — НЕ источник интересов: подстрочные совпадения по
+     доменам/именам дают ложные срабатывания (например, «nba» внутри «kanban»
+     → выдуманный «Спорт»). Cookies остаются только для доступа к видео (yt-dlp). */
+  const SEARCH_HOSTS = /(^|\.)(google\.[a-z.]+|yandex\.[a-z.]+|ya\.ru|duckduckgo\.com|bing\.com|startpage\.com|search\.brave\.com|go\.mail\.ru|search\.mail\.ru|nova\.rambler\.ru)$/i;
+  const YT_HOSTS = /(^|\.)(youtube\.com|youtu\.be|m\.youtube\.com|music\.youtube\.com)$/i;
+
+  function parseHistoryRows(rows) {
+    const searches = [];
+    const videos = [];
+    const seenQ = new Set();
+    const seenV = new Set();
+    for (const line of rows) {
+      if (!line || /^Domain=/.test(line)) continue; /* cookie-строки интересов не дают */
+      const tab = line.indexOf('\t');
+      const url = (tab < 0 ? line : line.slice(0, tab)).trim();
+      const title = (tab < 0 ? '' : line.slice(tab + 1)).trim();
+      let u;
+      try { u = new URL(url); } catch (e) { continue; }
+      const host = u.hostname;
+      if (SEARCH_HOSTS.test(host)) {
+        const q = (u.searchParams.get('q') || u.searchParams.get('text') || u.searchParams.get('p') || '').trim();
+        if (q.length >= 2 && q.length <= 200 && !seenQ.has(q)) { seenQ.add(q); searches.push(q); }
+        continue;
+      }
+      if (YT_HOSTS.test(host)) {
+        let id = '';
+        if (/youtu\.be$/i.test(host)) id = u.pathname.slice(1).split('/')[0];
+        else if (u.pathname === '/watch') id = u.searchParams.get('v') || '';
+        else { const m = u.pathname.match(/^\/(shorts|live|embed)\/([A-Za-z0-9_-]{6,})/); if (m) id = m[2]; }
+        if (id && /^[A-Za-z0-9_-]{6,}$/.test(id) && !seenV.has(id)) {
+          seenV.add(id);
+          videos.push({ id, title: title.replace(/\s*[-–—]\s*YouTube$/i, '').trim() || id });
+        }
+      }
+    }
+    return { searches, videos };
+  }
+
+  /* Применяет реальные сигналы истории: просмотренное на YouTube → watch
+     (source:'history', dur 0 — длительность неизвестна), запросы → yt-queries.json.
+     Старые cookie- и history-записи импорта удаляются, чтобы повторный импорт
+     не раздувал счётчики. */
+  function applyHistorySignals(sig) {
+    watch = watch.filter(s => s.source !== 'cookies' && s.source !== 'history');
+    const now = Date.now();
+    sig.videos.forEach((v, i) => {
+      watch.unshift({ id: v.id, title: v.title, channel: 'youtube (история)', dur: 0, watchedSec: 0, ts: now + i, source: 'history' });
     });
+    if (watch.length > 2000) watch = watch.slice(0, 2000);
+    saveWatch();
+    sig.searches.forEach(q => addQuery(q));
+    return { searches: sig.searches.length, videos: sig.videos.length };
   }
 
   /* Авто-темы: находятся в запросах и просмотрах, если сигналов ≥ 2. */
@@ -308,7 +448,7 @@ module.exports = (deps) => {
       .concat(queries.map(q => ({ title: q.q || '', channel: 'поиск' })));
     for (const s of src) {
       const text = (s.title + ' ' + s.channel).toLowerCase();
-      for (const t of EXTRA_THEMES) if (t.words.some(w => text.includes(w))) counts[t.key]++;
+      for (const t of EXTRA_THEMES) if (t.words.some(w => matchesWord(text, w))) counts[t.key]++;
     }
     const out = EXTRA_THEMES.filter(t => counts[t.key] >= 2)
       .map(t => ({ key: t.key, label: t.label, icon: t.icon, count: counts[t.key], weight: 0, auto: true, words: t.words.slice(0, 5) }));
@@ -359,6 +499,17 @@ module.exports = (deps) => {
       totalTime += dur;
       const text = (s.title || '') + ' ' + (s.channel || '');
       const toks = String(text).toLowerCase().match(/[a-zа-яё0-9]{4,}/g) || [];
+      for (const t of toks) {
+        if (t.length < 4 || /^\d+$/.test(t) || INTEREST_STOP.has(t)) continue;
+        wordCount.set(t, (wordCount.get(t) || 0) + 1);
+      }
+      for (const c of INTEREST_CATS) if (c.words.some(w => matchesWord(text, w))) counts[c.key]++;
+    }
+    /* запросы — реальные поисковые запросы из браузера и панели ▶ */
+    for (const q of queries) {
+      const text = String(q.q || '');
+      if (!text) continue;
+      const toks = text.toLowerCase().match(/[a-zа-яё0-9]{4,}/g) || [];
       for (const t of toks) {
         if (t.length < 4 || /^\d+$/.test(t) || INTEREST_STOP.has(t)) continue;
         wordCount.set(t, (wordCount.get(t) || 0) + 1);
@@ -505,10 +656,11 @@ module.exports = (deps) => {
         if (body && body.source === 'browser') {
           const ex = extractBrowserCookies(String(body.browser || '') || null);
           if (!ex.ok) return json(res, 404, { error: ex.error || 'browser cookies not found' });
-          try { fs.writeFileSync(COOKIES_FILE, ex.text, { flag: 'w' }); } catch (e) { return json(res, 500, { error: 'write failed' }); }
+          const cookieText = ex.text.split('\n').filter(l => /^Domain=/.test(l)).join('\n');
+          try { fs.writeFileSync(COOKIES_FILE, cookieText, { flag: 'w' }); } catch (e) { return json(res, 500, { error: 'write failed' }); }
           auth.browser = String(body.browser || '') || auth.browser || 'chrome';
           saveAuth();
-          return json(res, 200, { ok: true, size: Buffer.byteLength(ex.text), count: ex.count, browser: auth.browser });
+          return json(res, 200, { ok: true, size: Buffer.byteLength(cookieText), count: ex.cookieCount || 0, browser: auth.browser });
         }
       }
       if (!buf || !buf.length) return json(res, 400, { error: 'empty body' });
@@ -546,7 +698,8 @@ module.exports = (deps) => {
         channel: String(body.channel || '').slice(0, 120),
         dur: Math.max(0, Number(body.dur) || 0),
         watchedSec: Math.max(0, Math.round(Number(body.watchedSec) || 0)),
-        ts: Date.now()
+        ts: Date.now(),
+        source: String(body.source || 'panel').slice(0, 24)
       });
       if (watch.length > 1000) watch = watch.slice(0, 1000);
       saveWatch();
@@ -566,28 +719,7 @@ module.exports = (deps) => {
     return false;
   }
 
-  /* Применяет сигналы cookies в историю просмотров синтетическими записями
-     (source:'cookies'). Старые cookie-записи удаляются, чтобы повторный импорт
-     не раздувал счётчики. buildInterests() затем пересчитает карту. */
-  function applyCookieSignals(signals) {
-    watch = watch.filter(s => s.source !== 'cookies');
-    const now = Date.now();
-    signals.forEach((s, i) => {
-      watch.unshift({ title: s.word, channel: 'cookies', dur: 600, watchedSec: 600, ts: now + i, source: 'cookies', cat: s.key || null });
-    });
-    if (watch.length > 2000) watch = watch.slice(0, 2000);
-    saveWatch();
-    return signals.length;
-  }
-
-  /* Обновляет интересы из cookies. Возвращает детали импорта. */
-  function updateInterestsFromCookies(txt) {
-    const signals = cookieSignals(txt);
-    applyCookieSignals(signals);
-    return { updates: signals.length, signals };
-  }
-
-  /* ---------- импорт cookies с прогрессом (SSE) ---------- */
+  /* ---------- импорт истории с прогрессом (опрос, не SSE — лимит соединений) ---------- */
   const importJobs = new Map();
   const tick = ms => new Promise(r => setTimeout(r, ms || 0));
 
@@ -607,66 +739,71 @@ module.exports = (deps) => {
 
   async function runImportJob(job, opts) {
     try {
-      jobEmit(job, { stage: 'start', pct: 3, message: 'Запускаю импорт cookies…' });
+      jobEmit(job, { stage: 'start', pct: 3, message: 'Запускаю импорт истории браузера…' });
       await tick(40);
       let text = '', count = 0, usedBrowser = null, source = 'file';
       if (opts && opts.text != null) {
         text = String(opts.text);
-        jobEmit(job, { stage: 'file', pct: 8, message: 'Читаю загруженный cookies.txt (' + Math.round(text.length / 1024) + ' КБ)', count: 0 });
+        jobEmit(job, { stage: 'file', pct: 8, message: 'Читаю загруженный файл (' + Math.round(text.length / 1024) + ' КБ)', count: 0 });
         await tick(40);
       } else {
         const browser = String((opts && opts.browser) || '') || null;
-        const dbs = browserCookieDbs(browser);
+        const cookieDbs = browserCookieDbs(browser);
+        const historyDbs = browserHistoryDbs(browser);
+        const dbs = cookieDbs.map(db => ({ db, kind: 'cookies' })).concat(historyDbs.map(db => ({ db, kind: 'history' })));
         source = browser || 'auto';
-        jobEmit(job, { stage: 'scan', pct: 5, message: 'Ищу базы cookies' + (browser ? ' (' + browser + ')' : '') + '… найдено: ' + dbs.length, files: dbs.map(prettyDb) });
+        jobEmit(job, { stage: 'scan', pct: 5, message: 'Ищу базы cookies и истории' + (browser ? ' (' + browser + ')' : '') + '… найдено: ' + dbs.length, files: dbs.map(d => prettyDb(d.db)) });
         await tick(60);
-        if (!dbs.length) { jobEmit(job, { stage: 'error', pct: 100, message: 'Базы cookies не найдены — браузер не установлен или профиль пуст' }); job.done = true; return; }
+        if (!dbs.length) { jobEmit(job, { stage: 'error', pct: 100, message: 'Базы браузера не найдены — браузер не установлен или профиль пуст' }); job.done = true; return; }
         const lines = [];
+        let cookieCount = 0, historyCount = 0;
         for (let i = 0; i < dbs.length; i++) {
-          const db = dbs[i];
+          const { db, kind } = dbs[i];
           const base = 8 + Math.round((i / dbs.length) * 30);
-          jobEmit(job, { stage: 'read', pct: base, message: 'Читаю ' + prettyDb(db) + '…', file: prettyDb(db) });
+          jobEmit(job, { stage: 'read', pct: base, message: 'Читаю ' + (kind === 'history' ? 'историю ' : '') + prettyDb(db) + '…', file: prettyDb(db) });
           await tick(50);
-          const r = readOneCookieDb(db);
-          if (r.rows.length) { lines.push(...r.rows); usedBrowser = db; }
+          const r = kind === 'history' ? readOneHistoryDb(db) : readOneCookieDb(db);
+          if (r.rows.length) { lines.push(...r.rows); usedBrowser = usedBrowser || db; if (kind === 'history') historyCount += r.rows.length; else cookieCount += r.rows.length; }
           jobEmit(job, { stage: 'read', pct: base + 3, message: '  → ' + prettyDb(db) + ': записей ' + r.rows.length, count: r.rows.length, file: prettyDb(db) });
           await tick(40);
         }
-        if (!lines.length) { jobEmit(job, { stage: 'error', pct: 100, message: 'Cookies не найдены ни в одной базе (браузер закрыт или профиль пуст)' }); job.done = true; return; }
+        if (!lines.length) { jobEmit(job, { stage: 'error', pct: 100, message: 'Не найдено ни cookies, ни истории (браузер закрыт или профиль пуст)' }); job.done = true; return; }
         text = lines.join('\n');
         count = lines.length;
         try {
-          fs.writeFileSync(COOKIES_FILE, text, { flag: 'w' });
+          /* в файл сохраняем только cookie-строки (для yt-dlp), историю — не пишем */
+          fs.writeFileSync(COOKIES_FILE, lines.filter(l => /^Domain=/.test(l)).join('\n'), { flag: 'w' });
           auth.browser = String((opts && opts.browser) || '') || auth.browser || 'chrome';
           saveAuth();
         } catch (e) {}
-        jobEmit(job, { stage: 'read', pct: 40, message: 'Прочитано всего записей: ' + count + (usedBrowser ? ' (' + prettyDb(usedBrowser) + ')' : ''), count });
+        jobEmit(job, { stage: 'read', pct: 40, message: 'Прочитано записей: ' + count + ' (cookies ' + cookieCount + ', история ' + historyCount + ')' + (usedBrowser ? ' (' + prettyDb(usedBrowser) + ')' : ''), count, cookieCount, historyCount });
       }
 
-      jobEmit(job, { stage: 'parse', pct: 45, message: 'Разбираю домены и сигналы…' });
+
+      jobEmit(job, { stage: 'parse', pct: 45, message: 'Ищу в истории поисковые запросы и просмотренное на YouTube…' });
       await tick(60);
-      const signals = cookieSignals(text);
-      if (!signals.length) { jobEmit(job, { stage: 'error', pct: 100, message: 'Сигналов интересов в cookies не найдено' }); job.done = true; return; }
+      const sig = parseHistoryRows(text.split(/\r?\n/));
+      if (!sig.searches.length && !sig.videos.length) {
+        jobEmit(job, { stage: 'error', pct: 100, message: 'В загруженном тексте нет поисковых запросов и просмотров YouTube — импорт строится только из реальной истории (запросы Google/Яндекс и ролики)' });
+        job.done = true; return;
+      }
       const domains = (text.match(/Domain=([^\s;]+)/gi) || []).length;
 
-      /* базовая линия — без прежних cookie-сигналов, чтобы замер отражал вклад именно этих cookies */
-      watch = watch.filter(s => s.source !== 'cookies');
       const before = snapshot();
-      jobEmit(job, { stage: 'tags', pct: 48, message: 'Присваиваю теги интересов (' + signals.length + '):' });
+      const r = applyHistorySignals(sig);
+      jobEmit(job, { stage: 'tags', pct: 70, message: 'Принято: запросов ' + r.searches + ', просмотренных роликов ' + r.videos + ' (только реальные данные, без угадывания по cookies)' });
       await tick(60);
-
-      const now = Date.now();
-      const newTags = [];
-      for (let i = 0; i < signals.length; i++) {
-        const s = signals[i];
-        watch.unshift({ title: s.word, channel: 'cookies', dur: 600, watchedSec: 600, ts: now + i, source: 'cookies', cat: s.key || null });
-        if (!before.cats[s.key]) newTags.push(s.label);
-        const pct = 48 + Math.round(((i + 1) / signals.length) * 32);
-        jobEmit(job, { stage: 'tag', pct, message: s.icon + ' ' + s.label + ' ← #' + s.word, tag: s.word, label: s.label, icon: s.icon });
-        if (i % 2 === 0 || i === signals.length - 1) await tick(90);
+      let step = 0;
+      for (const q of sig.searches) {
+        step++;
+        jobEmit(job, { stage: 'tag', pct: 70 + Math.round((step / Math.max(1, sig.searches.length + sig.videos.length)) * 12), message: '🔍 Поиск: «' + q + '»', tag: q, label: 'Поиск', icon: '🔍' });
+        if (step % 3 === 0) await tick(50);
       }
-      if (watch.length > 2000) watch = watch.slice(0, 2000);
-      saveWatch();
+      for (const v of sig.videos) {
+        step++;
+        jobEmit(job, { stage: 'tag', pct: 70 + Math.round((step / Math.max(1, sig.searches.length + sig.videos.length)) * 12), message: '▶ ' + v.title, tag: v.title, label: 'YouTube', icon: '▶' });
+        if (step % 3 === 0) await tick(50);
+      }
 
       jobEmit(job, { stage: 'apply', pct: 82, message: 'Пересчитываю карту интересов…' });
       await tick(80);
@@ -679,16 +816,18 @@ module.exports = (deps) => {
         if (c.count > b) grown.push({ key: c.key, label: c.label, icon: c.icon, delta: c.count - b });
       }
       const delta = after.total - before.total;
-      const imported = signals.length > 0;
+      const added = r.searches + r.videos;
+      const imported = added > 0;
       const verify = {
         imported,
         beforeTotal: before.total,
         afterTotal: after.total,
         delta,
         grown,
-        newTags: Array.from(new Set(newTags)),
+        searches: r.searches,
+        videos: r.videos,
         message: imported
-          ? ('Импорт подтверждён: добавлено ' + signals.length + ' сигналов, ' + grown.length + ' тем выросло' + (grown.length ? ' (' + grown.map(g => g.icon + g.label).join(', ') + ')' : '') + '.')
+          ? ('Импорт подтверждён: ' + r.searches + ' запросов и ' + r.videos + ' роликов из истории, ' + grown.length + ' тем выросло' + (grown.length ? ' (' + grown.map(g => g.icon + g.label).join(', ') + ')' : '') + '.')
           : 'Импорт не дал новых сигналов.'
       };
       jobEmit(job, { stage: 'verify', pct: 90, message: verify.message, verify });
@@ -700,7 +839,7 @@ module.exports = (deps) => {
       jobEmit(job, { stage: 'portrait', pct: 97, message: 'Собираю ваш портрет…', portrait: after.portrait });
       await tick(60);
 
-      job.result = { ok: true, source, count, domains, updates: signals.length, verify, themes, portrait: after.portrait, interests: after };
+      job.result = { ok: true, source, count, domains, updates: added, searches: r.searches, videos: r.videos, verify, themes, portrait: after.portrait, interests: after };
       job.done = true;
       jobEmit(job, { stage: 'done', pct: 100, message: 'Готово', result: job.result });
     } catch (e) {
@@ -750,20 +889,47 @@ module.exports = (deps) => {
     if (req.method === 'GET' && p === '/api/interests/portrait') {
       return json(res, 200, buildInterests().portrait);
     }
-    if (req.method === 'POST' && p === '/api/interests/rebuild-from-cookies') {
+    if (req.method === 'POST' && p === '/api/interests/apply-rows') {
       return readBody(req).then(buf => {
-        let text = (buf || '').toString('utf8');
-        if (!text.trim()) { try { if (fs.existsSync(COOKIES_FILE)) text = fs.readFileSync(COOKIES_FILE, 'utf8'); } catch (e) {} }
-        const domains = (text.match(/Domain=([^\s;]+)/gi) || []).length;
-        const r = updateInterestsFromCookies(text);
+        let body = {};
+        try { body = JSON.parse((buf || '').toString('utf8') || '{}'); } catch (e) {}
+        const rows = Array.isArray(body.rows) ? body.rows : [];
+        const lines = rows.map(r => {
+          if (typeof r === 'string') return r;
+          if (!r || typeof r !== 'object') return '';
+          return String(r.url || '') + '\t' + String(r.title || '');
+        }).filter(Boolean);
+        const r = applyHistorySignals(parseHistoryRows(lines));
         const interests = buildInterests();
-        json(res, 200, { ok: true, domains, updates: r.updates, themes: interests.themes, portrait: interests.portrait });
+        return json(res, 200, {
+          ok: true,
+          source: String(body.source || 'device').slice(0, 24),
+          count: lines.length,
+          updates: r.searches + r.videos,
+          searches: r.searches,
+          videos: r.videos,
+          themes: interests.themes,
+          portrait: interests.portrait,
+          interests
+        });
+      });
+    }
+    if (req.method === 'POST' && p === '/api/interests/rebuild-from-cookies') {
+      /* cookies больше не источник интересов — эндпоинт оставлен для совместимости:
+         если передан текст с историей (url\t заголовок), строим из него; иначе просто
+         пересчитываем по текущим данным. */
+      return readBody(req).then(buf => {
+        const text = (buf || '').toString('utf8');
+        let r = { searches: 0, videos: 0 };
+        if (text.trim()) r = applyHistorySignals(parseHistoryRows(text.split(/\r?\n/)));
+        const interests = buildInterests();
+        json(res, 200, { ok: true, updates: r.searches + r.videos, searches: r.searches, videos: r.videos, themes: interests.themes, portrait: interests.portrait });
         return true;
       });
     }
     return false;
   }
 
-  return { handle, updateInterestsFromCookies, extractBrowserCookies, cookieSignals, buildInterests, interestsHandle };
+  return { handle, extractBrowserCookies, parseHistoryRows, applyHistorySignals, buildInterests, interestsHandle };
 
 };
